@@ -1,7 +1,7 @@
 use std::{f32::consts::PI, ops::RangeInclusive};
 
 use bevy::{prelude::*, sprite::Anchor, utils::FloatOrd};
-use bevy_inspector_egui::{Inspectable, WorldInspectorPlugin};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_rapier2d::prelude::*;
 use iyes_loopless::{
     prelude::{AppLooplessStateExt, ConditionSet, IntoConditionalSystem},
@@ -12,24 +12,24 @@ use rand::prelude::random;
 const SCREEN_WIDTH: f32 = 1280.0;
 const SCREEN_HEIGHT: f32 = 720.0;
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct GameUi;
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct Bounds;
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct ScoreText;
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct ObstacleBundle;
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct Bird {
     alive: bool,
 }
 
-#[derive(Component, Inspectable)]
+#[derive(Component)]
 struct Wall;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,7 +86,7 @@ fn main() {
         )
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
         .add_plugin(RapierDebugRenderPlugin::default())
-        .add_plugin(WorldInspectorPlugin::new())
+        .add_plugin(WorldInspectorPlugin)
         // Constant Resources
         .insert_resource(RapierConfiguration {
             gravity: Vec2::Y * -9.81 * 45.0,
@@ -235,23 +235,23 @@ fn spawn_obstacles(
                 })
                 .insert(Name::new("Ring Under"));
 
-            let collider_height = 20.0;
+            let collider_height = 15.0;
 
             commands
-                .spawn(Collider::cuboid(width / 3.0, collider_height))
+                .spawn(Collider::cuboid(width / 5.0, collider_height))
                 .insert(TransformBundle::from(Transform::from_xyz(
                     0.0,
-                    obstacle_config.y_mid_offset - collider_height / 2.0,
+                    obstacle_config.y_mid_offset - collider_height,
                     0.0,
                 )))
                 .insert(Wall)
                 .insert(Name::new(format!("Up @ {spawn_at}")));
 
             commands
-                .spawn(Collider::cuboid(width / 3.0, collider_height))
+                .spawn(Collider::cuboid(width / 5.0, collider_height))
                 .insert(TransformBundle::from(Transform::from_xyz(
                     0.0,
-                    -1.0 * obstacle_config.y_mid_offset + collider_height / 2.0,
+                    -1.0 * obstacle_config.y_mid_offset + collider_height,
                     0.0,
                 )))
                 .insert(Wall)
@@ -266,7 +266,7 @@ fn spawn_obstacles(
         });
 }
 
-#[derive(Inspectable, Component)]
+#[derive(Component)]
 struct TilingBackground;
 
 // TODO: make bidrectional as it currently only tiles to the right. sometimes bugs out when the bird bounces far back
@@ -488,8 +488,8 @@ fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                         "Score: 0",
                         TextStyle {
                             font: asset_server.load("fonts/OpenSans-Regular.ttf"),
-                            font_size: 20.0,
-                            color: Color::WHITE,
+                            font_size: 30.0,
+                            color: Color::BLACK,
                         },
                     )
                     .with_text_alignment(TextAlignment::TOP_LEFT)
