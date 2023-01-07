@@ -39,6 +39,9 @@ enum GameState {
 }
 
 #[derive(Resource)]
+struct PauseState(bool);
+
+#[derive(Resource)]
 struct Score(i32);
 
 impl Default for Score {
@@ -49,7 +52,6 @@ impl Default for Score {
 
 #[derive(Resource)]
 struct ObstacleConfig {
-    width: f32,
     min_x_between: f32,
     y_mid_range: RangeInclusive<f32>,
     y_mid_offset: f32,
@@ -58,7 +60,6 @@ struct ObstacleConfig {
 impl Default for ObstacleConfig {
     fn default() -> Self {
         Self {
-            width: 25.0,
             min_x_between: 650.0,
             y_mid_range: -100.0..=100.0,
             y_mid_offset: 125.0,
@@ -91,7 +92,8 @@ fn main() {
             gravity: Vec2::Y * -9.81 * 45.0,
             ..default()
         })
-        .insert_resource(ClearColor(Color::rgb(0.2, 0.2, 0.2)))
+        .insert_resource(ClearColor(Color::rgb_u8(173, 230, 255)))
+        .insert_resource(PauseState(false))
         // Global setup
         .add_loopless_state(GameState::Running)
         .add_startup_system(setup_camera)
@@ -102,31 +104,39 @@ fn main() {
         .add_enter_system(GameState::Running, setup_bounds)
         .add_enter_system(GameState::Running, setup_ui)
         .add_enter_system(GameState::Running, reset_camera)
+        .add_system(toggle_pause)
         .add_system_set(
             ConditionSet::new()
                 .run_in_state(GameState::Running)
-                .with_system(keyboard_input)
+                .run_if_not(is_paused)
+                .with_system(tiling_background)
+                .with_system(jump_on_space)
                 .with_system(camera_follows_bird)
                 .with_system(spawn_obstacles)
-                .with_system(despawn_obstacles)
+                .with_system(despawn_offscreen_obstacles)
                 .with_system(increment_score.run_on_event::<CollisionEvent>())
-                .with_system(world_bird_collisions.run_on_event::<ContactForceEvent>())
+                .with_system(kill_bird_on_collision.run_on_event::<ContactForceEvent>())
                 .with_system(bounds_follow_bird)
                 .with_system(bird_rotates_with_velocity)
                 .with_system(update_score_text)
-                .with_system(increase_difficulty)
-                .with_system(bird_leaves_screen)
+                .with_system(score_increases_difficulty)
+                .with_system(end_on_bird_leaves_screen)
                 .into(),
         )
         .add_exit_system(GameState::Running, despawn_components::<Bird>)
         .add_exit_system(GameState::Running, despawn_components::<ObstacleBundle>)
         .add_exit_system(GameState::Running, despawn_components::<Bounds>)
         .add_exit_system(GameState::Running, despawn_components::<GameUi>)
+        .add_exit_system(GameState::Running, despawn_components::<TilingBackground>)
         .add_exit_system(GameState::Running, remove_resource::<ObstacleConfig>)
         .add_exit_system(GameState::Running, remove_resource::<Score>)
         // Game Ended
-        .add_enter_system(GameState::Ended, restart_game)
+        .add_enter_system(GameState::Ended, immediately_restart_game)
         .run();
+}
+
+fn is_paused(pause_state: Res<PauseState>) -> bool {
+    pause_state.0
 }
 
 fn despawn_components<T: Component>(mut commands: Commands, q: Query<Entity, With<T>>) {
@@ -143,7 +153,7 @@ fn add_resource<T: Resource + Default>(mut commands: Commands) {
     commands.insert_resource(T::default());
 }
 
-fn restart_game(mut commands: Commands) {
+fn immediately_restart_game(mut commands: Commands) {
     commands.insert_resource(NextState(GameState::Running));
 }
 
@@ -167,6 +177,7 @@ fn spawn_obstacles(
     bird_query: Query<&Transform, (With<Bird>, Without<Camera2d>)>,
     obstacle_query: Query<(&Transform, &ObstacleBundle)>,
     obstacle_config: Res<ObstacleConfig>,
+    assets: Res<AssetServer>,
 ) {
     let max_obstacle_x: f32 = obstacle_query
         .iter()
@@ -185,6 +196,7 @@ fn spawn_obstacles(
         return;
     }
 
+    let width = 82.0;
     let y_mid = random::<f32>()
         * (obstacle_config.y_mid_range.end() - obstacle_config.y_mid_range.start())
         + obstacle_config.y_mid_range.start();
@@ -192,26 +204,54 @@ fn spawn_obstacles(
     commands
         .spawn(ObstacleBundle)
         .insert(SpatialBundle {
-            transform: Transform::from_xyz(spawn_at, 0.0, 0.0),
+            transform: Transform::from_xyz(spawn_at, y_mid, 0.0),
             ..default()
         })
         .insert(Name::new(format!("Obstacle @ {spawn_at}")))
         .add_children(|commands| {
             commands
-                .spawn(Collider::cuboid(obstacle_config.width, 5.0))
+                .spawn(SpriteBundle {
+                    sprite: Sprite {
+                        anchor: Anchor::Center,
+                        custom_size: Some(Vec2::new(width, obstacle_config.y_mid_offset * 2.0)),
+                        ..default()
+                    },
+                    texture: assets.load("images/ring_over.png"),
+                    transform: Transform::from_xyz(0.0, 0.0, 2.0),
+                    ..default()
+                })
+                .insert(Name::new("Ring Over"));
+
+            commands
+                .spawn(SpriteBundle {
+                    sprite: Sprite {
+                        anchor: Anchor::Center,
+                        custom_size: Some(Vec2::new(width, obstacle_config.y_mid_offset * 2.0)),
+                        ..default()
+                    },
+                    texture: assets.load("images/ring_under.png"),
+                    transform: Transform::from_xyz(0.0, 0.0, 0.9),
+                    ..default()
+                })
+                .insert(Name::new("Ring Under"));
+
+            let collider_height = 20.0;
+
+            commands
+                .spawn(Collider::cuboid(width / 3.0, collider_height))
                 .insert(TransformBundle::from(Transform::from_xyz(
                     0.0,
-                    y_mid + obstacle_config.y_mid_offset,
+                    obstacle_config.y_mid_offset - collider_height / 2.0,
                     0.0,
                 )))
                 .insert(Wall)
                 .insert(Name::new(format!("Up @ {spawn_at}")));
 
             commands
-                .spawn(Collider::cuboid(obstacle_config.width, 5.0))
+                .spawn(Collider::cuboid(width / 3.0, collider_height))
                 .insert(TransformBundle::from(Transform::from_xyz(
                     0.0,
-                    y_mid - obstacle_config.y_mid_offset,
+                    -1.0 * obstacle_config.y_mid_offset + collider_height / 2.0,
                     0.0,
                 )))
                 .insert(Wall)
@@ -219,14 +259,59 @@ fn spawn_obstacles(
 
             commands
                 .spawn(Collider::cuboid(10.0, obstacle_config.y_mid_offset))
-                .insert(TransformBundle::from(Transform::from_xyz(0.0, y_mid, 0.0)))
+                .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)))
                 .insert(Sensor)
                 .insert(ActiveEvents::COLLISION_EVENTS)
                 .insert(Name::new(format!("Sensor @ {spawn_at}")));
         });
 }
 
-fn despawn_obstacles(
+#[derive(Inspectable, Component)]
+struct TilingBackground;
+
+// TODO: make bidrectional as it currently only tiles to the right. sometimes bugs out when the bird bounces far back
+fn tiling_background(
+    mut commands: Commands,
+    camera_query: Query<&mut Transform, (With<Camera2d>, Without<TilingBackground>)>,
+    backgrounds_query: Query<(Entity, &mut Transform), (With<TilingBackground>, Without<Camera2d>)>,
+    assets: Res<AssetServer>,
+) {
+    let camera = camera_query.single();
+
+    // center-left anchors, with the width of one screen
+    let max_covered_x = backgrounds_query
+        .iter()
+        .map(|(_, t)| FloatOrd(t.translation.x + SCREEN_WIDTH))
+        .max()
+        .unwrap_or(FloatOrd(0.0))
+        .0;
+
+    let cover_until_x = camera.translation.x + SCREEN_WIDTH;
+
+    if max_covered_x < cover_until_x {
+        commands
+            .spawn(SpriteBundle {
+                sprite: Sprite {
+                    // anchor: Anchor::CenterLeft,
+                    custom_size: Some(Vec2::new(SCREEN_WIDTH, 2048.0)),
+                    ..default()
+                },
+                transform: Transform::from_xyz(max_covered_x, 0.0, 0.1),
+                texture: assets.load("images/bg_layer3.png"),
+                ..default()
+            })
+            .insert(Name::new(format!("Tiling Background @ {max_covered_x}")))
+            .insert(TilingBackground);
+    }
+
+    for (e, t) in backgrounds_query.iter() {
+        if t.translation.x < camera.translation.x - SCREEN_WIDTH * 2.0 {
+            commands.entity(e).despawn_recursive();
+        }
+    }
+}
+
+fn despawn_offscreen_obstacles(
     mut commands: Commands,
     bird_query: Query<&Transform, (With<Bird>, Without<Camera2d>)>,
     obstacle_query: Query<(Entity, &Transform, &ObstacleBundle)>,
@@ -304,7 +389,7 @@ fn setup_bird(mut commands: Commands, assets: Res<AssetServer>) {
                 custom_size: Some(Vec2::new(100.0, 50.0)),
                 ..default()
             },
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            transform: Transform::from_xyz(0.0, 0.0, 1.0),
             texture: assets.load("images/player.png"),
             ..default()
         })
@@ -323,7 +408,22 @@ fn setup_bird(mut commands: Commands, assets: Res<AssetServer>) {
         .insert(Bird { alive: true });
 }
 
-fn keyboard_input(
+fn toggle_pause(
+    keys: Res<Input<KeyCode>>,
+    mut pause_state: ResMut<PauseState>,
+    mut rapier_configuration: ResMut<RapierConfiguration>,
+) {
+    if keys.just_pressed(KeyCode::P) {
+        pause_state.0 = !pause_state.0;
+        rapier_configuration.timestep_mode = TimestepMode::Variable {
+            max_dt: 1.0 / 60.0,
+            time_scale: if pause_state.0 { 0.0 } else { 1.0 },
+            substeps: 1,
+        };
+    }
+}
+
+fn jump_on_space(
     keys: Res<Input<KeyCode>>,
     mut bird_query: Query<(&mut Velocity, &mut ExternalImpulse, &Bird)>,
 ) {
@@ -350,7 +450,7 @@ fn increment_score(mut collision_events: EventReader<CollisionEvent>, mut score:
     }
 }
 
-fn world_bird_collisions(mut bird_query: Query<(&mut CollisionGroups, &mut Bird)>) {
+fn kill_bird_on_collision(mut bird_query: Query<(&mut CollisionGroups, &mut Bird)>) {
     let (mut bird_collision_groups, mut bird) = bird_query.single_mut();
 
     // Bird no longer collides with anything
@@ -359,7 +459,7 @@ fn world_bird_collisions(mut bird_query: Query<(&mut CollisionGroups, &mut Bird)
     bird.alive = false;
 }
 
-fn bird_leaves_screen(bird_query: Query<&Transform, With<Bird>>, mut commands: Commands) {
+fn end_on_bird_leaves_screen(bird_query: Query<&Transform, With<Bird>>, mut commands: Commands) {
     let bird = bird_query.single();
     let bird_y = bird.translation.y;
     let margin = 50.0;
@@ -418,7 +518,7 @@ fn update_score_text(mut score_text_query: Query<&mut Text, With<ScoreText>>, sc
     score_text.sections[0].value = format!("Score: {score}");
 }
 
-fn increase_difficulty(mut obstacle_config: ResMut<ObstacleConfig>, score: Res<Score>) {
+fn score_increases_difficulty(mut obstacle_config: ResMut<ObstacleConfig>, score: Res<Score>) {
     if !score.is_changed() {
         return;
     }
@@ -427,7 +527,6 @@ fn increase_difficulty(mut obstacle_config: ResMut<ObstacleConfig>, score: Res<S
     let default_obstacle_config = ObstacleConfig::default();
 
     obstacle_config.min_x_between = 500.0_f32.max(default_obstacle_config.min_x_between - score);
-    obstacle_config.width = 50.0_f32.min(default_obstacle_config.width + 2.0 * score);
     obstacle_config.y_mid_offset = 100.0_f32.max(default_obstacle_config.y_mid_offset - score);
     obstacle_config.y_mid_range = (-200.0_f32
         .max(default_obstacle_config.y_mid_range.start() - score))
