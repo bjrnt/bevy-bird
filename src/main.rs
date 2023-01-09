@@ -1,6 +1,7 @@
 use std::{f32::consts::PI, ops::RangeInclusive};
 
 use bevy::{prelude::*, sprite::Anchor, utils::FloatOrd};
+#[cfg(debug_assertions)]
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use bevy_rapier2d::prelude::*;
 use iyes_loopless::{
@@ -68,71 +69,85 @@ impl Default for ObstacleConfig {
 }
 
 fn main() {
-    App::new()
-        // Plugins
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    window: WindowDescriptor {
-                        width: SCREEN_WIDTH,
-                        height: SCREEN_HEIGHT,
-                        title: "Bevy Bird".to_string(),
-                        resizable: false,
-                        ..Default::default()
-                    },
-                    ..default()
-                })
-                .set(ImagePlugin::default_nearest()),
-        )
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
-        .add_plugin(RapierDebugRenderPlugin::default())
-        .add_plugin(WorldInspectorPlugin)
-        // Constant Resources
-        .insert_resource(RapierConfiguration {
-            gravity: Vec2::Y * -9.81 * 45.0,
-            ..default()
-        })
-        .insert_resource(ClearColor(Color::rgb_u8(173, 230, 255)))
-        .insert_resource(PauseState(false))
-        // Global setup
-        .add_loopless_state(GameState::Running)
-        .add_startup_system(setup_camera)
-        // Game Running
-        .add_enter_system(GameState::Running, add_resource::<ObstacleConfig>)
-        .add_enter_system(GameState::Running, add_resource::<Score>)
-        .add_enter_system(GameState::Running, setup_bird)
-        .add_enter_system(GameState::Running, setup_bounds)
-        .add_enter_system(GameState::Running, setup_ui)
-        .add_enter_system(GameState::Running, reset_camera)
-        .add_system(toggle_pause)
-        .add_system_set(
-            ConditionSet::new()
-                .run_in_state(GameState::Running)
-                .run_if_not(is_paused)
-                .with_system(tiling_background)
-                .with_system(jump_on_space)
-                .with_system(camera_follows_bird)
-                .with_system(spawn_obstacles)
-                .with_system(despawn_offscreen_obstacles)
-                .with_system(increment_score.run_on_event::<CollisionEvent>())
-                .with_system(kill_bird_on_collision.run_on_event::<ContactForceEvent>())
-                .with_system(bounds_follow_bird)
-                .with_system(bird_rotates_with_velocity)
-                .with_system(update_score_text)
-                .with_system(score_increases_difficulty)
-                .with_system(end_on_bird_leaves_screen)
-                .into(),
-        )
-        .add_exit_system(GameState::Running, despawn_components::<Bird>)
-        .add_exit_system(GameState::Running, despawn_components::<ObstacleBundle>)
-        .add_exit_system(GameState::Running, despawn_components::<Bounds>)
-        .add_exit_system(GameState::Running, despawn_components::<GameUi>)
-        .add_exit_system(GameState::Running, despawn_components::<TilingBackground>)
-        .add_exit_system(GameState::Running, remove_resource::<ObstacleConfig>)
-        .add_exit_system(GameState::Running, remove_resource::<Score>)
-        // Game Ended
-        .add_enter_system(GameState::Ended, immediately_restart_game)
-        .run();
+    let mut app = App::new();
+    // Plugins
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                window: WindowDescriptor {
+                    width: SCREEN_WIDTH,
+                    height: SCREEN_HEIGHT,
+                    title: "Bevy Bird".to_string(),
+                    resizable: false,
+                    ..Default::default()
+                },
+                ..default()
+            })
+            .set(ImagePlugin::default_nearest()),
+    )
+    .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+    // Constant Resources
+    .insert_resource(RapierConfiguration {
+        gravity: Vec2::Y * -9.81 * 45.0,
+        ..default()
+    })
+    .insert_resource(ClearColor(Color::rgb_u8(173, 230, 255)))
+    .insert_resource(PauseState(false))
+    // Global setup
+    .add_loopless_state(GameState::Running)
+    .add_startup_system(setup_camera)
+    // Game Running
+    .add_enter_system(GameState::Running, add_resource::<ObstacleConfig>)
+    .add_enter_system(GameState::Running, add_resource::<Score>)
+    .add_enter_system(GameState::Running, setup_bird)
+    .add_enter_system(GameState::Running, setup_bounds)
+    .add_enter_system(GameState::Running, setup_ui)
+    .add_enter_system(GameState::Running, reset_camera)
+    .add_system(toggle_pause)
+    .add_system_set(
+        ConditionSet::new()
+            .run_in_state(GameState::Running)
+            .run_if_not(is_paused)
+            .with_system(tiling_background)
+            .with_system(jump_on_space)
+            .with_system(camera_follows_bird)
+            .with_system(spawn_obstacles)
+            .with_system(despawn_offscreen_obstacles)
+            .with_system(increment_score.run_on_event::<CollisionEvent>())
+            .with_system(kill_bird_on_collision.run_on_event::<ContactForceEvent>())
+            .with_system(bounds_follow_bird)
+            .with_system(bird_rotates_with_velocity)
+            .with_system(update_score_text)
+            .with_system(score_increases_difficulty)
+            .with_system(end_on_bird_leaves_screen)
+            .into(),
+    )
+    .add_exit_system(GameState::Running, despawn_components::<Bird>)
+    .add_exit_system(GameState::Running, despawn_components::<ObstacleBundle>)
+    .add_exit_system(GameState::Running, despawn_components::<Bounds>)
+    .add_exit_system(GameState::Running, despawn_components::<GameUi>)
+    .add_exit_system(GameState::Running, despawn_components::<TilingBackground>)
+    .add_exit_system(GameState::Running, remove_resource::<ObstacleConfig>)
+    // Game Ended
+    .add_enter_system(GameState::Ended, setup_ended_ui)
+    .add_system_set(
+        ConditionSet::new()
+            .run_in_state(GameState::Ended)
+            .with_system(restart_on_space)
+            .with_system(restart_on_button_click)
+            .into(),
+    )
+    .add_exit_system(GameState::Ended, remove_resource::<Score>)
+    .add_exit_system(GameState::Ended, despawn_components::<GameUi>);
+
+    // Debug mode additions
+    #[cfg(debug_assertions)]
+    {
+        app.add_plugin(WorldInspectorPlugin)
+            .add_plugin(RapierDebugRenderPlugin::default());
+    }
+
+    app.run();
 }
 
 fn is_paused(pause_state: Res<PauseState>) -> bool {
@@ -151,10 +166,6 @@ fn remove_resource<T: Resource>(mut commands: Commands) {
 
 fn add_resource<T: Resource + Default>(mut commands: Commands) {
     commands.insert_resource(T::default());
-}
-
-fn immediately_restart_game(mut commands: Commands) {
-    commands.insert_resource(NextState(GameState::Running));
 }
 
 fn bird_rotates_with_velocity(mut bird_query: Query<(&Bird, &mut Transform, &Velocity)>) {
@@ -269,10 +280,9 @@ fn spawn_obstacles(
 #[derive(Component)]
 struct TilingBackground;
 
-// TODO: make bidrectional as it currently only tiles to the right. sometimes bugs out when the bird bounces far back
 fn tiling_background(
     mut commands: Commands,
-    camera_query: Query<&mut Transform, (With<Camera2d>, Without<TilingBackground>)>,
+    camera_query: Query<&Transform, (With<Camera2d>, Without<TilingBackground>)>,
     backgrounds_query: Query<(Entity, &mut Transform), (With<TilingBackground>, Without<Camera2d>)>,
     assets: Res<AssetServer>,
 ) {
@@ -305,7 +315,7 @@ fn tiling_background(
     }
 
     for (e, t) in backgrounds_query.iter() {
-        if t.translation.x < camera.translation.x - SCREEN_WIDTH * 2.0 {
+        if t.translation.x < camera.translation.x - SCREEN_WIDTH * 3.0 {
             commands.entity(e).despawn_recursive();
         }
     }
@@ -440,6 +450,14 @@ fn jump_on_space(
     i.impulse = Vec2::Y * 50.0;
 }
 
+fn restart_on_space(keys: Res<Input<KeyCode>>, mut commands: Commands) {
+    if !keys.just_pressed(KeyCode::Space) {
+        return;
+    }
+
+    commands.insert_resource(NextState(GameState::Running));
+}
+
 fn increment_score(mut collision_events: EventReader<CollisionEvent>, mut score: ResMut<Score>) {
     for collision_event in collision_events.iter() {
         let CollisionEvent::Started(_, _, _) = collision_event else {
@@ -505,6 +523,102 @@ fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 )
                 .insert(Name::new("Score Text"))
                 .insert(ScoreText);
+        });
+}
+
+fn restart_on_button_click(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<Button>)>,
+    mut commands: Commands,
+) {
+    for interaction in interaction_query.iter() {
+        if let Interaction::Clicked = interaction {
+            commands.insert_resource(NextState(GameState::Running));
+        }
+    }
+}
+
+fn setup_ended_ui(mut commands: Commands, asset_server: Res<AssetServer>, score: Res<Score>) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            background_color: Color::NONE.into(),
+            ..default()
+        })
+        .insert(GameUi)
+        .insert(Name::new("Game Ended UI"))
+        .add_children(|commands| {
+            commands
+                .spawn(
+                    TextBundle::from_section(
+                        format!("Score: {}", score.0),
+                        TextStyle {
+                            font: asset_server.load("fonts/OpenSans-Regular.ttf"),
+                            font_size: 80.0,
+                            color: Color::BLACK,
+                        },
+                    )
+                    .with_style(Style {
+                        size: Size::new(Val::Undefined, Val::Px(80.)),
+                        margin: UiRect {
+                            left: Val::Auto,
+                            right: Val::Auto,
+                            bottom: Val::Px(25.),
+                            ..default()
+                        },
+                        ..default()
+                    }),
+                )
+                .insert(Name::new("Score Text"));
+
+            commands
+                .spawn(ButtonBundle {
+                    style: Style {
+                        size: Size::new(Val::Px(140.), Val::Px(65.)),
+                        margin: UiRect::horizontal(Val::Auto),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    background_color: Color::rgb_u8(255, 204, 0).into(),
+                    ..default()
+                })
+                .with_children(|button| {
+                    button.spawn(TextBundle::from_section(
+                        "Restart",
+                        TextStyle {
+                            font: asset_server.load("fonts/OpenSans-Regular.ttf"),
+                            font_size: 40.,
+                            color: Color::rgba(0.0, 0.0, 0.0, 0.6),
+                        },
+                    ));
+                });
+
+            commands
+                .spawn(
+                    TextBundle::from_section(
+                        "(or press space)",
+                        TextStyle {
+                            font: asset_server.load("fonts/OpenSans-Regular.ttf"),
+                            font_size: 15.,
+                            color: Color::rgba(0., 0., 0., 0.25),
+                        },
+                    )
+                    .with_style(Style {
+                        size: Size::new(Val::Undefined, Val::Px(15.)),
+                        margin: UiRect {
+                            left: Val::Auto,
+                            right: Val::Auto,
+                            ..default()
+                        },
+                        ..default()
+                    }),
+                )
+                .insert(Name::new("Score Text"));
         });
 }
 
